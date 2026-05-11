@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>FocusMask</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="logo">🎭 FocusMask</span>
+    <span class="badge" id="badge">閒置</span>
+  </header>
+
+  <!-- 啟動中的模式卡片列 -->
+  <div id="active-list" class="hidden"></div>
+
+  <!-- 模式選擇（始終顯示） -->
+  <div class="mode-grid">
+    <button class="mode-btn" data-mode="focus">
+      <span class="mode-icon">🎯</span><span>專注</span>
+    </button>
+    <button class="mode-btn" data-mode="sleep">
+      <span class="mode-icon">🌙</span><span>睡眠</span>
+    </button>
+    <button class="mode-btn" data-mode="immersion">
+      <span class="mode-icon">🔒</span><span>沉浸</span>
+    </button>
+    <button class="mode-btn" data-mode="pomodoro">
+      <span class="mode-icon">🍅</span><span>番茄鐘</span>
+    </button>
+  </div>
+
+  <!-- 快速設定面板 -->
+  <div id="quick-panel" class="hidden"></div>
+
+  <footer>
+    <button id="btn-settings">⚙ 設定</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+node_modules/
+dist/
+build/
+.DS_Store
+._*
+*.sqlite
+*.db
+.claude/settings.local.json

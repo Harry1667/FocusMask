@@ -1,0 +1,236 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 300px;
+  background: #0a0a0a;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  user-select: none;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.logo { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: #1a1a1a;
+  color: #555;
+  transition: all .2s;
+}
+.badge.active { background: #fff; color: #000; }
+
+/* ─── 啟動中列表 ─── */
+#active-list {
+  padding: 10px 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.active-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 10px;
+}
+
+.active-card-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.active-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.active-card-sub {
+  font-size: 11px;
+  color: #555;
+}
+
+.active-card-timer {
+  font-size: 18px;
+  font-weight: 200;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+  color: #fff;
+  min-width: 54px;
+  text-align: right;
+}
+
+.active-card-stop {
+  background: none;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #444;
+  font-size: 13px;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-left: 10px;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.active-card-stop:hover { border-color: #f55; color: #f55; }
+
+/* ─── 模式格 ─── */
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 10px;
+  color: #aaa;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  position: relative;
+}
+
+.mode-btn:hover { background: #181818; border-color: #333; color: #fff; }
+
+/* 啟動中：白底黑字 */
+.mode-btn.running {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+.mode-btn.running:hover { background: #eee; }
+
+.mode-icon { font-size: 20px; }
+
+/* 啟動中小點 */
+.mode-btn.running::after {
+  content: '';
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 6px; height: 6px;
+  background: #0c0;
+  border-radius: 50%;
+}
+
+/* ─── 快速設定 ─── */
+#quick-panel {
+  margin: 10px 14px 0;
+  padding: 14px;
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 10px;
+}
+
+.qs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #888;
+}
+.qs-row label { flex: 1; }
+
+.qs-row input[type="number"],
+.qs-row input[type="text"] {
+  padding: 5px 8px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+.qs-row input[type="number"] { width: 70px; text-align: center; }
+.qs-row input[type="text"]   { width: 140px; }
+
+.qs-note { font-size: 12px; color: #555; margin-bottom: 10px; line-height: 1.5; }
+
+.btn-start {
+  width: 100%;
+  padding: 10px;
+  background: #fff;
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-start:hover { opacity: .85; }
+
+/* ─── 底部 ─── */
+footer {
+  padding: 10px 14px 12px;
+  border-top: 1px solid #1a1a1a;
+  margin-top: 12px;
+}
+
+#btn-settings {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+#btn-settings:hover { border-color: #333; color: #aaa; }
+
+/* 睡眠密碼驗證列 */
+.pwd-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.pwd-input {
+  flex: 1;
+  padding: 5px 8px;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  min-width: 0;
+}
+.pwd-input.error { border-color: #f55; }
+.pwd-ok, .pwd-cancel {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid #333;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+.pwd-ok { background: #fff; color: #000; border-color: #fff; }
+.pwd-ok:hover { opacity: .85; }
+.pwd-cancel { background: transparent; color: #555; }
+.pwd-cancel:hover { border-color: #555; color: #aaa; }
+
+.hidden { display: none !important; }

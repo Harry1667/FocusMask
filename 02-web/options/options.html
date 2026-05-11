@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>FocusMask 設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <aside>
+    <div class="logo">🎭 FocusMask</div>
+    <nav>
+      <a class="nav-item active" data-tab="focus">🎯 專注</a>
+      <a class="nav-item" data-tab="sleep">🌙 睡眠</a>
+      <a class="nav-item" data-tab="immersion">🔒 沉浸</a>
+      <a class="nav-item" data-tab="pomodoro">🍅 番茄鐘</a>
+      <a class="nav-item" data-tab="general">⚙ 一般</a>
+    </nav>
+  </aside>
+
+  <main>
+    <!-- 專注 -->
+    <section id="tab-focus" class="tab active">
+      <h2>專注模式</h2>
+      <div class="field">
+        <label>預設時長（分鐘，0 = 無限）</label>
+        <input type="number" id="focus-duration" min="0" max="480" placeholder="60">
+      </div>
+      <div class="field">
+        <label>允許的網站</label>
+        <div class="site-input-row">
+          <input type="text" id="focus-site-input" placeholder="例：google.com">
+          <button id="focus-site-add">新增</button>
+        </div>
+        <ul class="site-list" id="focus-site-list"></ul>
+      </div>
+    </section>
+
+    <!-- 睡眠 -->
+    <section id="tab-sleep" class="tab">
+      <h2>睡眠模式</h2>
+      <div class="field">
+        <label>自動啟用排程</label>
+        <label class="toggle">
+          <input type="checkbox" id="sleep-enabled">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="field">
+        <label>睡眠時段</label>
+        <div class="time-row">
+          <input type="time" id="sleep-start" value="23:00">
+          <span>至</span>
+          <input type="time" id="sleep-end" value="06:00">
+        </div>
+      </div>
+      <div class="field">
+        <label>啟用天（週日=0）</label>
+        <div class="day-row" id="sleep-days"></div>
+      </div>
+      <div class="field">
+        <label>解鎖密碼（留空 = 可直接停止）</label>
+        <input type="password" id="sleep-password" placeholder="（選填）">
+      </div>
+      <div class="field">
+        <label>允許的網站</label>
+        <div class="site-input-row">
+          <input type="text" id="sleep-site-input" placeholder="例：spotify.com">
+          <button id="sleep-site-add">新增</button>
+        </div>
+        <ul class="site-list" id="sleep-site-list"></ul>
+      </div>
+    </section>
+
+    <!-- 沉浸 -->
+    <section id="tab-immersion" class="tab">
+      <h2>沉浸模式</h2>
+      <div class="field">
+        <label>允許的輔助網站</label>
+        <div class="site-input-row">
+          <input type="text" id="immersion-site-input" placeholder="例：github.com">
+          <button id="immersion-site-add">新增</button>
+        </div>
+        <ul class="site-list" id="immersion-site-list"></ul>
+      </div>
+    </section>
+
+    <!-- 番茄鐘 -->
+    <section id="tab-pomodoro" class="tab">
+      <h2>番茄鐘設定</h2>
+      <div class="field">
+        <label>工作時長（分鐘）</label>
+        <input type="number" id="pomo-work" min="1" max="120" placeholder="25">
+      </div>
+      <div class="field">
+        <label>短休息（分鐘）</label>
+        <input type="number" id="pomo-short" min="1" max="30" placeholder="5">
+      </div>
+      <div class="field">
+        <label>長休息（分鐘）</label>
+        <input type="number" id="pomo-long" min="1" max="60" placeholder="15">
+      </div>
+      <div class="field">
+        <label>幾個番茄後長休息</label>
+        <input type="number" id="pomo-cycles" min="1" max="10" placeholder="4">
+      </div>
+      <div class="field">
+        <label>允許的網站</label>
+        <div class="site-input-row">
+          <input type="text" id="pomodoro-site-input" placeholder="例：notion.so">
+          <button id="pomodoro-site-add">新增</button>
+        </div>
+        <ul class="site-list" id="pomodoro-site-list"></ul>
+      </div>
+    </section>
+
+    <!-- 一般 -->
+    <section id="tab-general" class="tab">
+      <h2>一般設定</h2>
+      <div class="field">
+        <label>桌面通知</label>
+        <label class="toggle">
+          <input type="checkbox" id="notif-enabled" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="field danger-zone">
+        <label>重置所有設定</label>
+        <button id="btn-reset" class="btn-danger">重置</button>
+      </div>
+    </section>
+
+    <div class="save-bar">
+      <span id="save-msg"></span>
+      <button id="btn-save">儲存設定</button>
+    </div>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>
