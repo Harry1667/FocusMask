@@ -2,11 +2,21 @@
 name: hdw-proxycli
 description: |
   AI Proxy CLI 管理與除錯。管理 proxy-cli 服務（gRPC + 儀表板），
-  處理 provider 切換、憑證、fallback chain、部署、觀測、備份/還原。
+  多 provider（Claude/Gemini/Codex/...）動態切換、憑證、fallback chain、
+  多模態（圖/PDF/影片/音訊/YouTube）路由、媒體生成、部署、觀測、備份/還原。
   Use when: "proxycli", "proxy-cli", "AI proxy", "gRPC proxy",
   "provider fallback", "claude quota", "gemini quota", "openai quota",
   "clip.twloop.com", "port 50051", "port 8091", "effort", "routing",
-  "備份 DB", "prometheus metrics", "auto route"
+  "備份 DB", "prometheus metrics", "auto route",
+  "/api/chat", "/api/generate", "/api/embed",
+  "/api/generate/async", "/api/jobs", "media job", "async job", "job_id",
+  "讀圖", "讀 PDF", "youtube_urls", "TTS", "生圖", "多模態",
+  "Gemini CLI 讀圖", "codex 讀圖", "codex 生圖", "gpt-image-2",
+  "image generation", "image_generation tool", "媒體生成",
+  "image-to-image", "variation", "edit image", "改圖",
+  "quality tier", "quality fast", "quality best",
+  "x-pcli-error-code", "trailing metadata", "gRPC trailers",
+  "not_found", "error_code"
 allowed-tools:
   - Bash
   - Read
@@ -18,6 +28,17 @@ allowed-tools:
 # /proxycli — AI Proxy CLI 管理 Skill
 
 管理 proxy-cli 服務（gRPC + dashboard），多 provider 動態切換、觀測、部署。
+
+## 細節資料（progressive disclosure）
+
+主檔保持精簡，以下情境用 Read 載入對應檔案：
+
+| 需要時 Read | 內容 |
+|-------------|------|
+| `references/troubleshooting.md` | 完整 11 個故障情境（PMTU 黑洞、DSM ACL、crashloop 等）|
+| `references/client-examples.md` | Python `use_proxycli` SDK / 直連 gRPC / Node.js / TypeScript 完整範例 |
+| `references/config-yaml.md` | `config.yaml` 完整可用範本（所有 provider 鍵值、cache、routing 等）|
+| `proxy-cli` repo `docs/api.md` | **完整 REST API spec**（`/api/chat`、`/api/generate`、`/api/embed`、`/api/usage/media` schema + 範例 + error_code 列舉）|
 
 ## ⚠️ Claude CLI Provider — ToS 灰區（2026-04-19 大清理）
 
@@ -203,6 +224,35 @@ meta = [("authorization", f"Bearer {TOKEN}")]
 - **外網客戶端卻連 `192.168.32.1:50051`**：連不到（私有 IP），會卡在 SYN 階段 timeout。
 - **同 NAS 卻不加 network 直接用容器名**：Docker DNS 查不到，`Name or service not known`。
 
+### gRPC 結構化錯誤（2026-05-03 起，trailing metadata）
+
+server abort 前會 `set_trailing_metadata`，client 從 `RpcError.trailing_metadata()` 拿結構化 error。**舊 client 沒讀也不會壞**（從 `details()` 字串拿訊息），新 client 用 trailers 比 regex 解字串可靠。
+
+| trailer key | 可能值 | 意義 |
+|---|---|---|
+| `x-pcli-error-code` | `bad_request` / `auth_invalid` / `quota_exhausted` / `provider_down` / `unknown` | 結構化錯誤分類 |
+| `x-pcli-retryable` | `"1"` / `"0"` | client 是否該 retry |
+
+```python
+try:
+    resp = await stub.Complete(req, metadata=md)
+    if resp.error_code:
+        # success-with-warning（如 fallback 成功），content 仍有效
+        log_warning(resp.error_code, resp.error_message)
+    return resp.content
+except grpc.aio.AioRpcError as e:
+    trailers = dict(e.trailing_metadata() or [])
+    code = trailers.get("x-pcli-error-code", "unknown")
+    retryable = trailers.get("x-pcli-retryable", "0") == "1"
+    if retryable:
+        await asyncio.sleep(10)
+        # retry once
+        ...
+    raise ProxyError(code, e.details())
+```
+
+**為什麼不是 google.rpc.Status / Any error_details？** 那需要多裝 `grpcio-status`、client 解 Any，繁瑣。trailing metadata 是 gRPC 原生機制，server 2 行、client 1 行解決。
+
 ## Fallback 機制
 
 請求不指定 `provider` 時（**推薦**）：
@@ -298,9 +348,9 @@ Server 端映射到 Claude API 的 `thinking.budget_tokens`：
 > **重要**：effort 設定時會**跳過 CLI 直接走 direct API**（CLI 不支援 thinking）。
 > 需要在 dashboard 設定 `CLAUDE_API_KEY` 或 `ANTHROPIC_API_KEY` 才會生效，否則失敗 fallback 到下一個 provider。
 
-### `images` / `videos` / `youtube_urls`（多模態，2026-04-23 大改）
+### `images` / `videos` / `youtube_urls`（多模態）
 
-`/api/chat` 接受三種媒體欄位（v2 修正：Gemini CLI OAuth 也吃多模態，先前認為不行是錯的）：
+`/api/chat` 接受三種媒體欄位。Gemini CLI OAuth 模式可讀 image + PDF（用 `@file` 引用 workspace 內檔案），不用花 API key：
 
 ```python
 # 讀圖（提供 provider=gemini 走最快免費路徑）
@@ -387,29 +437,214 @@ ssh nas "/usr/local/bin/docker logs ai-proxy --tail 30 | grep -E 'gemini CLI 讀
 # 2026-04-23 10:14:28 [INFO] src.dashboard: gemini CLI 讀圖路徑（OAuth）：1 張圖片
 ```
 
-### `/api/generate`（媒體生成，早就有）
+### `/api/generate`（媒體生成）
 
-```python
-# TTS（語音合成）
-POST /api/generate {"prompt": "hello world", "type": "tts", "project": "..."}
-→ {"items": [{"mime_type": "audio/L16;codec=pcm;rate=24000", "data": "<b64>"}]}
+完整 schema 在 `docs/api.md`。常用範例：
 
-# 圖片生成（rate-limit 嚴）
-POST /api/generate {"prompt": "red apple", "type": "image", "project": "..."}
+```bash
+# 最簡單（Gemini 預設，1 張）
+POST /api/generate {"prompt":"red apple","type":"image","project":"..."}
 
-# 影片（Veo）/ 音樂（Lyria）
-POST /api/generate {"prompt": "...", "type": "video|music", "project": "..."}
+# 強制 codex CLI（OAuth 免費，gpt-image-2），16:9，4 張
+POST /api/generate {"prompt":"city skyline","type":"image",
+                    "provider":"openai","aspect_ratio":"16:9",
+                    "style_hint":"realistic, cinematic","n":4,"project":"..."}
+
+# Image-to-image / variation（必走 Gemini gemini-2.5-flash-image）
+POST /api/generate {"prompt":"add sunglasses",
+                    "type":"image",
+                    "images":[{"mime_type":"image/png","data":"<base64>"}],
+                    "project":"..."}
+
+# Quality tier（fast 便宜快、best 高品質貴）
+POST /api/generate {"prompt":"...","type":"image","quality":"fast","project":"..."}
+POST /api/generate {"prompt":"...","type":"image","quality":"best","project":"..."}
+
+# TTS / 影片 / 音樂（強制 Gemini API）
+POST /api/generate {"prompt":"hello","type":"tts","project":"..."}
+POST /api/generate {"prompt":"...","type":"video|music","project":"..."}
 ```
 
-| type | model（預設）| 來源 | 需要 |
-|------|-------------|------|------|
-| tts | `gemini-2.5-flash-preview-tts` | Gemini API | API key（OAuth scope 不夠）|
-| image | `gemini-2.5-flash-image` | Gemini API | API key + free tier 配額嚴 |
-| video | `veo-3.0-generate-001` | Gemini API | API key（付費）|
-| music | `lyria-3-clip-preview` | Gemini API | API key（受限）|
+欄位（2026-05-02 + 2026-05-03）：
 
-**所有媒體生成都需 Gemini API Key**（沒實作 OAuth 路徑，scope 不夠）。
+| 欄位 | 說明 |
+|------|------|
+| `provider` | image only：`openai` 強制 codex CLI；其他預設 Gemini API |
+| `aspect_ratio` | `1:1`/`16:9`/`9:16`/`4:3`/`3:4`/`3:2`/`2:3`/`21:9`/`9:21`；image / video |
+| `style_hint` | 任意風格描述，編進 prompt |
+| `n` | 1-4，image only。proxy 並發 N 次，回 `items[]` 多張 |
+| `quality` | image only：`fast`（強制 Gemini flash-image）/ `best`（偏好 codex gpt-image-2）|
+| `images` | image only：image-to-image / variation。`[{mime_type, data(base64)}]`。**有此欄位強制走 Gemini gemini-2.5-flash-image**（codex `image_generation` tool 不支援 input image）|
+
+#### 路由優先級（image type）
+
+```
+1. images 非空 → 強制 Gemini gemini-2.5-flash-image（image-to-image）
+2. quality=fast → 強制 Gemini gemini-2.5-flash-image
+3. quality=best 或 provider=openai → codex CLI（gpt-image-2）
+4. 預設 → Gemini API
+5. 沒 Gemini key 但 codex 可用 → fallback codex
+6. codex 失敗有 Gemini key → 反向 fallback Gemini
+```
+
+| type | 預設來源 | 模型 | 需要 |
+|------|---------|------|------|
+| tts | Gemini API | `gemini-2.5-flash-preview-tts` | API key（OAuth scope 不夠）|
+| **image** | **codex CLI（`provider=openai`）/ Gemini API（預設）** | `gpt-image-2` / `gemini-2.5-flash-image` | codex 用 OAuth 免費；Gemini 走 API key |
+| video | Gemini API | `veo-3.0-generate-001` | API key（付費）|
+| music | Gemini API | `lyria-3-clip-preview` | API key（受限）|
+
+**TTS / 影片 / 音樂仍只能走 Gemini API Key**（OAuth scope 不夠）。
+**生圖兩條路**：`provider=openai` 走 codex CLI（OAuth 免費，下節詳述）；預設或 `provider=gemini` 走 Gemini API。
 TTS 預設聲音 `Zephyr`，可在 `direct.py:_generate_content_media` 改。
+
+#### 失敗時的 error_code 列舉（2026-05-02 上線）
+
+`/api/generate` / `/api/usage/media` 失敗 response：
+
+```json
+{
+  "ok": false,
+  "error": "人類可讀錯誤訊息",
+  "error_code": "quota_exhausted",
+  "actual_provider": "gemini",
+  "retryable": true,
+  "details": "原始 API body 前 300 字"
+}
+```
+
+| `error_code` | 意義 | client 處置 |
+|---|---|---|
+| `bad_request` | 缺欄位 / 值錯（400）| 修 prompt/payload，**不要 retry** |
+| `auth_invalid` | API key 沒設 / OAuth 過期（401/403/503）| 通知管理員，**不要 retry** |
+| `not_found` | resource 不存在（如 job_id 不在 / 不屬於你，404，2026-05-03）| **不要 retry**，輸入錯 ID 或別人的 |
+| `quota_exhausted` | 配額用完（429/502）| 可換 `provider` retry 或等 1 hr |
+| `content_policy` | 被 safety filter 擋（502）| **不要 retry 同 prompt**，要改 prompt |
+| `provider_down` | 5xx / timeout（502）| 同 provider retry。**async path proxy 已自動 retry 1 次**（3s 延遲）|
+| `unknown` | 沒分類到 | 看 `details`，謹慎 retry |
+
+n>1 部分成功時 200 OK，多帶 `partial_errors[]` 陣列。
+
+範例：要 4 張、3 張成功 1 張被 safety 擋：
+```json
+{
+  "ok": true,
+  "n_requested": 4,
+  "n_succeeded": 3,
+  "items": [<3 個 base64 PNG>],
+  "partial_errors": [
+    {"error_code": "content_policy", "error_msg": "blocked by safety filter"}
+  ]
+}
+```
+
+client 端建議處理：
+```js
+if (r.n_succeeded < r.n_requested) {
+  showWarning(`${r.n_succeeded}/${r.n_requested} 張生成成功`);
+  // partial_errors 拿 error_code 顯示為什麼缺
+  const codes = (r.partial_errors || []).map(e => e.error_code);
+  if (codes.includes("content_policy")) hintRewordPrompt();
+  else if (codes.includes("quota_exhausted")) hintTryLater();
+}
+// 不需要 retry — proxy 已經並發跑 N 次，partial 失敗是各自獨立原因
+```
+
+#### Async 媒體生成（2026-05-03 上線）
+
+`POST /api/generate/async` 立即回 `job_id`，背景跑；client `GET /api/jobs/{id}` 輪詢。
+適用 video（分鐘級）+ 大張 image batch（n=4 codex 也會卡 30s+）。
+
+```bash
+# 1. 提交
+POST /api/generate/async {"prompt":"...","type":"video","project":"..."}
+# → {"ok":true,"job_id":"<uuid>","status":"queued","poll_url":"/api/jobs/<uuid>"}
+
+# 2. 輪詢
+GET /api/jobs/<uuid>
+# 進行中：{"ok":true,"status":"running",...}
+# 完成：  {"ok":true,"status":"succeeded","result":{<完整 /api/generate body>}}
+# 失敗：  {"ok":true,"status":"failed","error_code":"...","error_msg":"..."}
+
+# 3. 列表（自己的 job）
+GET /api/jobs?limit=20&status=succeeded
+```
+
+**狀態機**：
+
+| 狀態 | 意義 |
+|---|---|
+| `queued` | 還沒 start。proxy 重啟也保留，啟動時自動重生 worker 接續跑 |
+| `running` | 執行中 |
+| `succeeded` | 完成，result 是完整 `/api/generate` body |
+| `failed` | 失敗，`error_code` / `error_msg` 在頂層 |
+| `lost` | **執行中**撞 proxy 重啟 → 無法安全 resume；client 重送 |
+
+**proxy 自動 retry**：worker 內 `provider_down` 自動 retry 1 次（3s 延遲），其他 error_code 立刻 fail。client 不用自己重送 transient 5xx。
+
+**安全注意**：`GET /api/jobs/{id}` 只能查自己的 job；別人的或不存在都回 `404 + error_code: not_found`（不洩漏存在性）。
+
+**client 範例**（JS）：
+```js
+const r = await fetch("/api/generate/async", {method: "POST", headers, body}).then(r => r.json());
+const jobId = r.job_id;
+while (true) {
+  await new Promise(r => setTimeout(r, 4000));
+  const j = await fetch(`/api/jobs/${jobId}`, {headers}).then(r => r.json());
+  if (j.status === "succeeded") return j.result;
+  if (j.status === "failed" || j.status === "lost") throw new Error(`${j.error_code}: ${j.error_msg}`);
+}
+```
+
+#### `/api/usage/media` — 媒體用量查詢
+
+```bash
+GET /api/usage/media?type=image&days=1
+# 回傳 {"providers": [{provider, model, requests, input_tokens, output_tokens, avg_latency_ms}, ...]}
+```
+
+可拿來顯示「今日 codex 已用 X 張、Gemini 已用 Y 張」。free tier 上限 proxy 不 enforce，client 自行對照。
+
+#### Codex CLI 生圖（OAuth 免費路徑，2026-05-02 驗證）
+
+`codex` CLI **v0.123+ 內建 `image_generation` tool**（模型 `gpt-image-2`），用 ChatGPT 訂閱 OAuth 直接呼叫，**不需 OpenAI API Key**：
+
+```bash
+# 直接用 codex exec 生圖（容器內或本地 Mac 都可，需 codex login）
+codex exec -C "$(pwd)" -s workspace-write --skip-git-repo-check \
+  "用 image generation tool 生成紅蘋果在白底，存成 ./apple.png"
+```
+
+關鍵細節：
+- **吃 Codex CLI usage limits**（不是 ChatGPT 對話池），burn rate 是普通對話的 **3-5×**
+- 原圖預設 `~1254×1254`，落 `~/.codex/generated_images/<session-id>/<hash>.png`，需自己 cp + sips 縮放
+- 跟 Gemini API 路徑互補：codex 燒 ChatGPT 訂閱、Gemini 燒 API key 配額
+
+**proxy-cli 路由現況（2026-05-02 上線）**：
+- `/api/generate type=image` 路由：
+  - `provider=openai` → **codex CLI（OAuth 免費，gpt-image-2）**
+  - 預設 / `provider=gemini` → Gemini API（imagen / nano-banana）
+  - 沒 Gemini API key 時自動 fallback 到 codex CLI
+  - codex 失敗有 Gemini key 才 fallback Gemini API
+- 實作位於 `pool.py:ProcessPool.generate_image_via_codex()`：codex 跑 read-only sandbox（NAS DSM kernel 不支援 bwrap，所以**不依賴 codex shell tool**），直接從 `~/.codex/generated_images/<thread_id>/*.png` 讀檔回傳
+- 實測：~25-30s/張、~25k input + ~30 output tokens、回傳 1254×1254 PNG
+- 用法：
+  ```bash
+  curl -X POST https://clip.twloop.com/api/generate \
+    -H "Authorization: Bearer <token>" \
+    -d '{"prompt":"red apple","type":"image","provider":"openai","project":"..."}'
+  # 回傳 actual_source="cli", actual_provider="openai"
+  ```
+
+驗證：
+```bash
+# 本地測試
+codex --version  # 需 ≥0.123（Mac brew 升 npm install -g @openai/codex@latest）
+mkdir -p /tmp/codex-img && cd /tmp/codex-img && \
+codex exec -C "$(pwd)" -s workspace-write --skip-git-repo-check \
+  "用 image generation tool 生成藍色蝴蝶，存成 ./b.png"
+ls -la /tmp/codex-img/b.png
+```
 
 ### Web search / URL fetch（CLI 自動觸發）
 
@@ -489,345 +724,46 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ## 常見問題
 
-### `Claude CLI 進入 stdin 互動模式`
-- 原因：Claude CLI 認為需要互動式輸入（通常 auth 失效或版本問題）
-- 錯誤類型 `cli_error`，會觸發 fallback chain
-- **確認**：`config.yaml` 中 `openai.enabled: true`，fallback 會自動試 codex
-
-> **⚠️ 陷阱 1**：`codex exec` 正常輸出也會有 `Reading additional input from stdin...`，
-> 這**不是錯誤**。`_is_stdin_prompt_notice` 已限定只對 `provider == "claude"` 生效。
-> 若日後改 stdin 偵測邏輯，務必保持此 provider 判斷。
-
-> **⚠️ 陷阱 2**：`_parse_codex_output` 解析 JSON Lines：
-> - 內容來自 `item.completed` 事件的 `item.text`（`type == "agent_message"`）
-> - token 數來自 `turn.completed` 事件的**頂層** `usage`，不在 `turn` 裡面
-> - codex 版本更新輸出格式時需同步更新
-
-> **⚠️ 陷阱 3**：`/api/health` 的 `available: true` ≠ auth 有效。
-> pool 初始化後 available 為 true，但憑證過期時實際請求仍 401。
-> 確認 auth 真的可用：`echo test | claude --print`
+> 完整 11 個情境見 `references/troubleshooting.md`。下面只列最常碰到的 3 個。
 
 ### `/ready` 回 503
-- 表示無 healthy slot（所有 provider 憑證都失效或 disabled）
-- 查 `GET /api/health` 看每個 provider 的 `healthy_slots` 和 `auth_ok`
+- 表示無 healthy slot。查 `GET /api/health` 看每個 provider 的 `healthy_slots` 和 `auth_ok`
 - 多半是 Claude token 過期 → 跑下面的重新登入流程
 
 ### Claude token 過期 → 重新登入
 
-> **⚠️ 陷阱 4（歷史：`_patch_claude_creds` 已於 2026-04-19 刪除）**：
-> 過去 Tokyo aapanel 上 `statsig.anthropic.com` 被 Cloudflare 封鎖，CLI 會誤報 "Not logged in"。
-> 原本有 `_patch_claude_creds()` 自動補欄位，但這**等於偽造訂閱層級**，2026-04 實測導致帳號被封。
->
-> **✅ 現在的處理方式**：
-> - `creds_incomplete` 錯誤 → 直接降級為 `auth_expired`
-> - Dashboard 顯示「憑證欄位缺失，請重登」紅燈
-> - 使用者走 OAuth web flow（`clip.twloop.com` 側邊欄「登入 Claude」按鈕），新 token 覆蓋 slot-0
->
-> **❌ 禁止**：不得補寫 `rateLimitTier` / `subscriptionType` / `organizationUuid` 等欄位，
-> 不得呼叫 `api.anthropic.com/api/oauth/claude_cli/roles`。詳見專案倉庫 `CLAUDE.md`「ToS 灰區」。
+**Dashboard 路徑（推薦）**：開 `https://clip.twloop.com` → 側邊欄「登入 Claude」按鈕 → 瀏覽器 OAuth flow，新 token 覆蓋 slot-0。
 
-**重新登入流程（容器內互動式，需終端機）**：
+**容器內 CLI 路徑（dashboard 失效時）**：
 ```bash
-# 方法 1：Dashboard（推薦，最簡單）
-# 開 https://clip.twloop.com → 側邊欄「登入 Claude」按鈕 → 瀏覽器 OAuth flow
-
-# 方法 2：容器內 CLI 登入（方法 1 失效時）
 ssh -t nas "/usr/local/bin/docker exec -it ai-proxy su app -c 'claude /login'"
-# 完成後：
 ssh nas "/usr/local/bin/docker restart ai-proxy"
 ```
 
-**驗證新 token 可用**：
-```bash
-ssh nas "/usr/local/bin/docker exec ai-proxy bash -c 'HOME=/home/app claude --print --output-format json --model claude-haiku-4-5 \"hi\" 2>&1 | python3 -c \"import json,sys; print(json.load(sys.stdin).get(\\\"result\\\",\\\"\\\")[:60])\"'"
-```
+**自動同步**（Mac 端 cron）：本機 `~/.local/bin/sync-claude-token-to-nas.sh` 每小時檢查 Mac Keychain，必要時 push 到 NAS + restart。詳見「自動同步 Claude token」段。
 
-### 🔴 外網 gRPC 客戶端連不上 / RST_STREAM（NPM 需 grpc_pass，不是 proxy_pass）
+### 🔴 外網 gRPC 連不上 / RST_STREAM
+**根因**：NPM 用 `proxy_pass` 不能跑 gRPC。要在 NPM `cli.twloop.com` Custom Nginx 寫 `grpc_pass grpc://192.168.32.1:50051`。詳見 `references/troubleshooting.md`。
 
-**症狀：**
-- 外網 gRPC 客戶端（e.g. Tokyo VPS 上的 agent-social）打 `cli.twloop.com:443` 收到 `RST_STREAM` / `INTERNAL_ERROR`
-- 內網直連 `192.168.0.126:50051` 正常
-- Dashboard（`clip.twloop.com`）HTTP 路徑也正常
+**驗證**：`grpcurl -d '{}' cli.twloop.com:443 aiproxy.AIProxy/HealthCheck` 回 JSON 即通。
 
-**原因：**
-NPM 預設用 `proxy_pass`（HTTP/1.1 & HTTP/2 一般 request），gRPC frame 會被當普通 HTTP/2 訊息處理 → 後端拒絕 → RST_STREAM。
-
-**修法（NPM Admin UI，推薦）：**
-
-1. 開 http://192.168.0.126:9081 （admin 帳號密碼登入）
-2. Hosts → Proxy Hosts → 找到 `cli.twloop.com` → Edit
-3. **Custom locations** tab → 新增一個 location 或改既有的：
-   - Location: `/`
-   - Scheme: **不要選 http/https，這裡要手刻**（NPM UI 沒有 grpc scheme 選項）
-4. 切到 **Advanced** tab → **Custom Nginx Configuration** 貼入：
-
-   ```nginx
-   # gRPC 反代（HTTP/2 + gRPC frame 正確處理）
-   location / {
-       grpc_pass grpc://192.168.32.1:50051;   # 容器內網 IP，見下方註記
-       grpc_read_timeout 300s;
-       grpc_send_timeout 300s;
-       error_page 502 = /error502grpc;
-   }
-
-   location = /error502grpc {
-       internal;
-       default_type application/grpc;
-       add_header grpc-status 14;
-       add_header content-length 0;
-       return 204;
-   }
-   ```
-5. **SSL** tab → 確認已發 Let's Encrypt 憑證、勾 **Force SSL**、勾 **HTTP/2 Support**
-6. Save → NPM 會自動 reload nginx
-
-**⚠️ 重要：`grpc://` 不是 `grpcs://`**
-專案 `config.yaml` 的 `tls_enabled: false`，gRPC 伺服器明碼跑（NPM 端做 TLS 終止 + 明碼轉發給容器）。如果寫 `grpcs://` 會 handshake 失敗。
-
-**Backend IP（`192.168.32.1`）怎麼確認：**
-```bash
-# 從 docker log 看容器訪問來源 IP（NPM 容器發出的）
-ssh nas "/usr/local/bin/docker logs ai-proxy --tail 20 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort -u"
-# 或查 docker 網路
-ssh nas "/usr/local/bin/docker network inspect bridge | grep -A2 ai-proxy"
-```
-DSM 的 docker bridge 網段通常是 `192.168.32.0/20`，ai-proxy 容器常拿到 `192.168.32.X`。若 NPM 跟 ai-proxy 在**同一個 compose network**（`deploy-nas_default`）則可直接用 `ai-proxy:8080` 但 gRPC port 是 50051 不是 8080，且 NPM 容器不一定連到該網路 → 保險用 host network IP `192.168.32.1:50051`（host 側 port mapping）。
-
-**驗證（本機 Mac）：**
-```bash
-# 用 grpcurl 測試外網 gRPC 連線
-grpcurl -d '{}' cli.twloop.com:443 aiproxy.AIProxy/HealthCheck
-# 預期：回傳 healthy 狀態 JSON
-# 若回 RST_STREAM 或 "unexpected HTTP status code" → NPM 還沒生效
-```
-
-**為什麼 clip.twloop.com（HTTP dashboard）沒事？**
-因為它是一般 HTTP/HTTPS，NPM 的 `proxy_pass` 處理得了。gRPC 才需要特殊 handling。
-
-### 🔴 外網 `HealthCheck` 通但 `Complete` hang（多向量診斷法，2026-04-19 踩過）
-
-**症狀：** 工程師從 Tokyo VPS 報 Bun + `@grpc/grpc-js`：
-- HealthCheck ~200ms OK
-- Complete 60s deadline exceeded，container log 沒有任何 Complete 進來的痕跡
-- 同 token 同 VPS REST `/api/chat` 4s 正常
-
-**第一反應 ≠ root cause**：不要急著改 NPM `grpc_pass` 配置或改 server trailer handling。大概率是 **client vantage 特有問題**（網路路徑、client lib 版本、MTU），不是 server 或 NPM bug。
-
-**三向量測試**（用來切分責任）：
-
-| 向量 | 指令 | 解讀 |
-|---|---|---|
-| A) 容器內 localhost | `docker exec ai-proxy python3 -c "...stub.Complete(...)"` | 通 → backend 沒問題 |
-| B) Mac 外網 grpcurl | `grpcurl -d '{...}' -H "authorization: Bearer $T" cli.twloop.com:443 aiproxy.AIProxy/Complete` | 通 → NPM 沒問題 |
-| C) 工程師 VPS grpcurl | 同上在他那台機跑 | 若這個也 hang → 100% 是他端網路 / MTU |
-
-**A 和 B 都通 = NPM/backend 清白**，責任推回 client 端。
-
-**client 端 checklist（給工程師）：**
-
-1. **PMTU 黑洞**（Lightsail ↔ 台灣 IP 常見）：路徑中某跳 drop ICMP，大 DATA frame silent drop。小 response (HealthCheck) 通、大 response (Complete ~500 bytes 含 headers+trailers) 死。
-   ```bash
-   sudo ip route change default via <GW> dev <IF> advmss 1200
-   # 或 sysctl net.ipv4.tcp_mtu_probing=1
-   ```
-
-2. **`@grpc/grpc-js` / Bun 版本**：我方驗證 Bun 1.3.11 + `@grpc/grpc-js` 1.10+ 都通。升最新試。
-
-3. **Proto 同步**：對 MD5。v3.1 之後 `CompletionResponse` 新增 `actual_provider`/`actual_model` 兩欄。不同步不會 hang（forward-compat），但可以順便對。
-
-4. **GRPC_TRACE debug**：`GRPC_TRACE=http,flowctl GRPC_VERBOSITY=DEBUG` 跑一次，看是 SETTINGS/WINDOW_UPDATE 之後死（flow control）還是 DATA frame 發不出（MTU）。
-
-**千萬不要做的事：**
-- 不要因為這個徵狀就去改 NPM `grpc_pass` 配置（前面別節已講解正確配置，再改也不會好）
-- 不要改 `server.py` Complete handler 加 flush/trailer hack（handler 跟 HealthCheck 同 servicer class，代碼路徑只差一個 await）
-- 不要降 deadline 或加 retry（根因是網路 drop，retry 只是把 timeout 變更久）
-
-### 🔴 codex 每次 180s timeout / gemini refresh 寫入失敗（DSM ACL read-only bind mount）
-
-**症狀：**
-- `POST /api/chat` 指定 `provider=openai` 卡 ~180s 後 `curl: (28) Operation timed out`
-- log 有 `failed to create session: Permission denied (os error 13)` on `/home/app/.codex/sessions`
-- 或 `Permission denied: '/home/app/.gemini/oauth_creds.json'`（token refresh 寫回失敗）
-- claude 可能正常（讀 token 就夠），但 long-term 也會因為 refresh 失敗壞掉
-
-**根因：** Synology DSM 的 NFSv4 ACL。host 看起來 `drwxrwxrwx+`，但 bind mount 進容器後 `app` user 實際是 read-only。POSIX perm bits 騙人。
-
-**一分鐘快檢：**
-```bash
-ssh nas "/usr/local/bin/docker exec -u app ai-proxy sh -c 'echo x > /home/app/.codex/test 2>&1'"
-# "Permission denied" → 中招
-```
-
-**修法（已 commit 32d6d56）：** `entrypoint.sh` root 啟動時 `chmod -R u+w,g+w /home/app/.{claude,gemini,codex}`。重啟後即修復。
-
-**臨時 hotfix（來不及 rebuild）：**
-```bash
-ssh nas "/usr/local/bin/docker exec -u root ai-proxy chmod -R u+w,g+w /home/app/.claude /home/app/.gemini /home/app/.codex"
-```
-
-### 🔴 hotfix 部署 src/*.py 後容器 crashloop（`PermissionError: '/app/src/*.py'`）
-
-**症狀：** 用 `scp → docker cp` 熱更新 Python 檔（不走 rebuild）後容器起不來，log 連環出：
-```
-PermissionError: [Errno 13] Permission denied: '/app/src/server.py'
-```
-
-**根因：** DSM ACL 同一個坑的變形 — host 側 scp 出來的檔案 perms 是 `600`（只 root 讀），`docker cp` 進 image 時保留 600，app user 讀不到。entrypoint 的 chmod 只管 `/home/app/*` 不管 `/app/src`。
-
-**修法：**
-```bash
-# 1. host 端先 chmod 644（關鍵！docker cp 會帶 perms 進去）
-ssh nas "chmod 644 /volume1/docker/proxy-cli/src/*.py /volume1/docker/proxy-cli/proto/*.py"
-
-# 2. stop → cp → chown → start
-ssh nas "\
-  /usr/local/bin/docker stop ai-proxy && \
-  /usr/local/bin/docker start ai-proxy && sleep 3 && \
-  /usr/local/bin/docker cp /volume1/docker/proxy-cli/src/server.py ai-proxy:/app/src/server.py && \
-  /usr/local/bin/docker cp /volume1/docker/proxy-cli/src/dashboard.py ai-proxy:/app/src/dashboard.py && \
-  /usr/local/bin/docker exec -u root ai-proxy sh -c 'chown -R app:app /app/src /app/proto && chmod -R u+r,g+r /app/src /app/proto' && \
-  /usr/local/bin/docker restart ai-proxy"
-```
-
-**正規做法（日後 rebuild 就沒這問題）：** `docker compose -f deploy-nas/docker-compose.yml up -d --build`（Dockerfile 的 COPY + `chown -R app:app /app` 搞定）。熱更新只是 debug 加速手段，**不是生產流程**。
-
-### 工程師回報「claude 過期時沒 fallback，錯誤直接回 client」
-
-**症狀：** client 收到「claude 憑證已過期」，按理應 fallback 到其他 provider。
-
-**先別改 fallback 邏輯 — 99% 是以下三種狀況之一：**
-
-1. **Fallback chain 全部失效**：`execute_with_fallback` 流程是 CLI → direct API → project fallback_model → FALLBACK_CHAIN。若 chain 上所有 provider CLI 都壞（典型 = DSM ACL bug 那段時間 codex/gemini 都寫不了 session/token），且沒設對應的 API Key env var，chain 回 None，原 claude error 被退回 client。**不是 fallback 邏輯 bug**，是真的沒備援了。驗證：看 `/api/creds` 是否全綠。
-
-2. **瞬時 race**：claude token 剛過期 → 先打到的 request 會走完 fallback，但同一秒內先撈到 `pool.available=True`（slot 還沒被 `mark_failed`）的 request 會走短路徑。回避：client 側保留 retry-once（engineer 已加）。
-
-3. **設定錯**：`config.yaml` 或 env 沒給 fallback provider 可用憑證。`/api/creds` 看哪些 provider `healthy_slots=0`。
-
-**code reference：**
-- `src/pool.py:970` `execute_with_fallback` 主流程
-- `src/pool.py:1086` `_try_fallback_chain` 跑 chain
-- `src/pool.py:835` `FALLBACK_CHAIN` 順序
-
-### 工程師回報「/api/recent 的 group 欄位空字串」
-
-**不是 bug，欄位名稱看錯**。server 回的是 `group_name`（snake_case），不是 `group`。
-
-驗證：
-```bash
-curl -s "http://192.168.0.126:8091/api/recent?limit=3&project=agent-social" -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | grep group_name
-# 預期看到 "group_name": "<value>"
-```
-
-SQLite 欄位也是 `group_name` 不是 `group`（`group` 是 SQL keyword 會衝突）。Client SDK 如果 typed 成 `r.group` 會永遠 undefined，改用 `r.group_name`。
-
-### `actual_source` 欄位（2026-04-19 新增）
-
-`CompletionResponse` / REST `/api/chat` response 都有 `actual_source: "cli" | "api" | "cache"`：
-
-- `cli`：走 Claude Code / Gemini CLI / codex OAuth（免費額度，ToS 灰區）
-- `api`：走付費 API Key（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / ...）
-- `cache`：記憶體 prompt 快取命中（無實際 provider call）
-
-Client 要分開計「免費 OAuth 流量 vs 付費 API 流量」就讀這欄。Commit 7015a1b。
-
-### TLS 憑證快到期
-啟動時 log 會顯示剩餘天數，`<30 天` warning、`<7 天` error：
-```
-TLS 憑證將在 15 天內到期 (2026-05-02T00:00:00+00:00)
-```
-更新憑證後 `docker restart ai-proxy`。
-
-### Slot 被 quarantine（帳號風控訊號，2026-04-19 新增）
-
-**症狀：** log 出現 `CRITICAL ... slot-N 被永久隔離（帳號風控訊號）`，或 dashboard Claude 風險卡片顯示 🔴 紅燈 + 錯誤訊息含「suspended」/「abuse」/「risk review」等字串。
-
-**意義：** Anthropic backend 對該 OAuth 帳號發出風控訊號。再繼續用會觸發更嚴厲的封鎖（全面停權）。
-
-**處理步驟：**
-1. **不要急著清除 quarantine** — 先確認真的是誤判，還是 Anthropic 真的在查
-2. 停止該帳號**至少 24 小時**（讓流量行為消失在 risk engine 的觀察窗口）
-3. 檢查 `/api/recent?provider=claude` 看最近 24h 流量模式（是否超過 cap？有沒有異常 spike？）
-4. 如確認是誤判，手動清除 quarantine：目前**無 dashboard UI，需直接操作容器**
-   ```bash
-   ssh nas "/usr/local/bin/docker restart ai-proxy"
-   # 重啟會清掉記憶體中的 quarantined 狀態（但 risk 訊號會再來 = 沒根治）
-   ```
-5. 若持續觸發 → 換到 Anthropic 付費 API Key（`ANTHROPIC_API_KEY` env var，走 `_call_claude_apikey` ToS 合規路徑）
-
-### Daily cap 被觸發
-
-**症狀：** log 出現 `Provider claude 今日 Token 已達上限 (NNN/300000)`，dashboard 風險卡片顯示 🟡 或 🔴。
-
-**意義：** 今日累積 Claude token 超過預設 300k cap（避免被 Anthropic 認定為異常使用）。流量會**自動 fallback** 到其他 provider（DeepSeek / OpenAI / Gemini），使用者應看得到回應。
-
-**處理：**
-- 若 cap 設太低：dashboard「配額」→ 新增 `target_type=provider, target_name=claude, daily_tokens=500000`（調高）
-- 若 cap 合理但被異常流量吃光：查 `/api/recent?provider=claude&days=1` 看是誰在狂用
-- 等午夜 UTC 00:00（台灣 08:00）counter 自動重置
+### 其他情境（去 references/troubleshooting.md）
+- `Claude CLI 進入 stdin 互動模式`
+- 外網 `HealthCheck` 通但 `Complete` hang（PMTU 黑洞 / Bun 版本）
+- codex 180s timeout / gemini refresh 失敗（DSM ACL read-only）
+- hotfix `docker cp` 後 crashloop（host perms 600 帶進去）
+- 工程師回報「claude 過期沒 fallback」/「group 欄位空」
+- `actual_source` 欄位語意
+- TLS 憑證快到期 / Slot quarantine / Daily cap
 
 ## 讀取實際 provider / model
 
-`CompletionResponse` 內建兩個欄位，不論請求是否指定 provider、是否觸發 fallback：
+`CompletionResponse` / REST `/api/chat` 都有：
+- `actual_provider`：fallback 觸發後實際的 provider
+- `actual_model`：實際模型 ID
+- `actual_source`：`"cli"` | `"api"` | `"cache"`
 
-| 欄位 | 型別 | 說明 |
-|------|------|------|
-| `actual_provider` | string | 實際執行的 provider（fallback 後會不同於請求） |
-| `actual_model` | string | 實際使用的模型 ID |
-
-### Python SDK（use_proxycli）
-```python
-from proxy import ai_detail
-result = ai_detail("用一句話介紹你自己", project="web-app", group="chatbot")
-print(result["content"])
-print(f"provider: {result['actual_provider']}")  # e.g. "openai"（fallback）
-print(f"model:    {result['actual_model']}")     # e.g. "gpt-4o-mini"
-```
-
-### 直接用 gRPC（Python）
-```python
-import grpc, aiproxy_pb2 as pb, aiproxy_pb2_grpc as rpc
-
-channel = grpc.insecure_channel("clip.twloop.com:50051")
-stub = rpc.AIProxyStub(channel)
-meta = [("authorization", "Bearer <token>")]
-
-resp = stub.Complete(
-    pb.CompletionRequest(
-        prompt="用一句話介紹你自己",
-        project="web-app",
-        group="chatbot",         # v3.0.0 起必填
-        # 不指定 provider，自動挑可用的
-        # effort="low",          # 可選（Claude thinking）
-    ),
-    metadata=meta,
-)
-print(resp.content, resp.actual_provider, resp.actual_model)
-```
-
-### Node.js
-```js
-client.Complete(
-  { prompt: "用一句話介紹你自己", project: "web-app", group: "chatbot", effort: "" },
-  meta,
-  (err, resp) => {
-    if (err) return console.error(err.message);
-    console.log(resp.content, resp.actual_provider, resp.actual_model);
-  }
-);
-```
-
-### TypeScript（型別參考）
-```ts
-interface CompletionResponse {
-  content: string;
-  input_tokens: number;
-  output_tokens: number;
-  tokens_estimated: boolean;
-  latency_ms: number;
-  actual_provider: string;   // fallback 時會與請求不同
-  actual_model: string;
-}
-```
+**完整 SDK 範例**（Python `use_proxycli`、Node.js / TS、直連 gRPC）見 `references/client-examples.md`。
 
 ## 部署流程
 
@@ -1018,59 +954,12 @@ tail -f /tmp/sync-claude-token.log
 
 ## config.yaml 完整範本
 
-```yaml
-server:
-  grpc_port: 50051
-  dashboard_port: 8080
-  tls_enabled: false
-  tls_cert: certs/server.crt
-  tls_key: certs/server.key
-
-users:
-- name: admin
-  token: <admin-token>         # 備份/還原/CSV 匯出 需要的就是這個 token
-- name: user1
-  token: <user1-token>
-
-projects:
-- web-app
-- data-pipeline
-
-pool:
-  min_size: 2                  # 目前未生效（保留）
-  max_size: 4
-  max_queue_depth: 10
-  request_timeout: 60
-  queue_timeout: 30            # 目前未生效（保留）
-  # health_probe_interval: 已 deprecated（2026-04-19 ToS 合規：排程 probe 全部移除）
-  # 保留 key 避免破壞舊 config，但系統不再讀取。
-  race_mode: false             # true = 多 slot 並行競速（⚠️ 單 slot 政策下無意義，保留 flag 不會觸發）
-
-routing:
-  auto: false                  # true = client 未指定 model+tier 時依 prompt 自動分類
-
-providers:
-  claude:
-    enabled: true              # false = 不初始化 pool
-    command: claude
-    fallback_model: claude-haiku-4-5
-  gemini:
-    enabled: true
-    command: gemini
-    fallback_model: gemini-2.5-flash
-  openai:
-    enabled: true              # 必須 true 才能用 codex fallback
-    command: codex
-    fallback_model: gpt-4o-mini
-
-cache:
-  max_size: 200
-  ttl: 300                     # 秒
-
-security:
-  rate_limit_per_minute: 0     # 0 = 不限流
-  max_tokens_per_request: 8192
-```
+完整模板見 `references/config-yaml.md`。最常需要改的：
+- `users[]`：加用戶 + token（`name: admin` 觸發 HTTP admin 端點，**不建議使用**）
+- `projects[]`：加專案
+- `providers.*.enabled`：開關 provider
+- `pool.race_mode`：單 slot 政策下無意義，保留 false
+- `routing.auto`：true = 自動依 prompt 分類選 tier
 
 ## Dashboard UI 指引
 

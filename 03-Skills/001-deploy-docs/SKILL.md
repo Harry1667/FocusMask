@@ -160,6 +160,36 @@ ls /www/wwwroot/
 /www/wwwroot/<專案名稱>.looptw.com
 ```
 
+### ⚠️ 每次部署前必掃：現有 Port 路由表
+
+> 下方「現有專案 Port 路由表」只是快照，會過時。**每次部署前都要在伺服器跑這段掃描**，
+> 用實際結果挑下一個可用 port，不要憑記憶猜。
+
+```bash
+# 已在 sudo su 狀態下，一次掃出 nginx 路由 + 實際監聽 + 已佔用 port
+bash -c '
+echo "=== 現有 Node port 路由（nginx → 實際監聽）==="
+printf "%-28s %-8s %-22s %s\n" 域名 nginxPort 監聽程序 狀態
+for f in /www/server/panel/vhost/nginx/*.looptw.com.conf; do
+  [ -e "$f" ] || continue
+  d=$(basename "$f" .conf)
+  p=$(grep -rhoE "proxy_pass http://127.0.0.1:[0-9]+" "$f" /www/server/panel/vhost/nginx/proxy/${d}/*.conf 2>/dev/null | grep -oE "[0-9]+$" | head -1)
+  [ -z "$p" ] && continue
+  proc=$(ss -tlnp 2>/dev/null | grep -E "[*:.]$p " | grep -oE "users:\(\(\"[^\"]+" | head -1 | grep -oE "[^\"]+$")
+  st=$([ -n "$proc" ] && echo OK || echo "⚠️無監聽")
+  printf "%-28s %-8s %-22s %s\n" "$d" "$p" "${proc:--}" "$st"
+done
+echo
+echo "=== 已被佔用的 30xx port（含 docker / 內部服務）==="
+ss -tlnp 2>/dev/null | grep -oE "[*:.]30[0-9][0-9] " | grep -oE "30[0-9]+" | sort -u
+'
+```
+
+挑「已被佔用」清單以外的最小 port 給新專案。
+
+> 📌 **用掉一個 port 後，記得回來更新本檔（`001-deploy-docs/SKILL.md`）下方的「現有專案 Port 路由表」**，
+> 把新域名、port、PM2 名稱補進去，下次才不會撞 port。
+
 ---
 
 ## Step 2：判斷專案類型
@@ -187,7 +217,15 @@ grep -l "sqlite\|leveldb" package.json 2>/dev/null
 # 已在 sudo su 狀態下
 git config --global --add safe.directory /www/wwwroot/<專案名稱>.looptw.com
 cd /www/wwwroot/
+
+# 公開 repo：直接 clone
 git clone https://github.com/<帳號>/<repo>.git <專案名稱>.looptw.com
+
+# 私有 repo：伺服器若已裝 gh 且登入，用 gh clone 最省事
+#   gh repo clone <帳號>/<repo> <專案名稱>.looptw.com
+# 否則用 token（用完即清，別寫進 remote）：
+#   git clone https://<帳號>:<PERSONAL_ACCESS_TOKEN>@github.com/<帳號>/<repo>.git <專案名稱>.looptw.com
+
 cd <專案名稱>.looptw.com
 ```
 
@@ -562,15 +600,24 @@ pm2 start <name>
 | 磁碟 | 193GB 總容量，181GB 可用 |
 | 檔案擁有者 | 所有 web 檔案必須是 `www:www` |
 
-### 現有專案 Port 路由表
+### 現有專案 Port 路由表（快照，以實際掃描為準）
 
-| 域名 | 內部路徑 | 類型 | Port | PM2 名稱 |
+> ⚠️ 這張表是 **2026-05-21** 的快照，僅供參考。真正的依據是 Step 1 的掃描指令。
+
+| 域名 | 類型 | Port | PM2 名稱 | 狀態 |
 |---|---|---|---|---|
-| `mentora.looptw.com` | `/www/wwwroot/mentora.looptw.com/02-web` | Next.js | **3000** | `mentora-web` |
-| `mathbox.looptw.com` | `/www/wwwroot/mathbox.looptw.com/02-web` | Node ESM | **3001** | `mathbox-web` |
-| `survivalwallet.looptw.com` | `/www/wwwroot/survivalwallet.looptw.com` | React SPA + PHP | N/A | N/A |
+| `mentora.looptw.com` | Next.js | **3000** | `mentora-web`（+`mentora-bridge`） | ✅ |
+| `reportassist.looptw.com` | Bun | **3001** | `reportassist-api` | ✅ |
+| `chatcal.looptw.com` | Node | **3002** | `chatcal-web`（+`chatcal-bot`） | ✅ |
+| `imageanalysis.looptw.com` | Next.js | **3005** | `imageanalysis-web` | ✅ |
+| `socialbot.looptw.com` | Next.js | **3006** | （Next） | ✅ |
+| `documentchatbot.looptw.com` | Next.js | **3007** | `documentchatbot-web` | ✅ |
+| `mathbox.looptw.com` | Node ESM (Express) | **3008** | `mathbox` | ✅ |
+| `survivalwallet` / `homeworksolver` / `keystorage` / `linkchannel` / `nearsafe` / `worklog` / `zhijian` | 靜態 / PHP | N/A | — | 純前端或 PHP |
 
-**下一個新專案 Port：3002**
+- `3003` 被 docker-proxy 佔用，`3004`、`3010` 已被內部服務佔用。
+- **下一個新專案 Port：3009**（仍以掃描結果為準）。
+- ⚠️ 注意：程式若用 `process.env.PORT || 3001` 這種 fallback，務必在 PM2 設好 `PORT` env 並 `pm2 save`，否則撞 port crash loop（mathbox 曾因此 restart 46 萬次）。
 
 ### 已知環境限制
 

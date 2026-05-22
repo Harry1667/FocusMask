@@ -317,9 +317,19 @@ sudo su
 git config --global --add safe.directory /www/wwwroot/<專案>.looptw.com
 
 cd /www/wwwroot/
+
+# 公開 repo
 git clone https://github.com/<帳號>/<repo>.git <專案>.looptw.com
+# 私有 repo：伺服器裝了 gh 就 `gh repo clone <帳號>/<repo> <專案>.looptw.com`，
+# 否則用 token：`git clone https://<帳號>:<TOKEN>@github.com/<帳號>/<repo>.git ...`（用完清掉）
 cd <專案>.looptw.com
 ```
+
+> 💡 本機建立並推上 GitHub 已改用 gh CLI（取代手動在網頁建 repo）：
+> ```bash
+> gh auth status                                              # 確認已登入
+> gh repo create <repo> --private --source=. --remote=origin --push
+> ```
 
 ---
 
