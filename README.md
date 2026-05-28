@@ -21,3 +21,29 @@ Chrome 瀏覽器專注遮罩擴充程式 — 一鍵啟動黑色遮罩封鎖分�
 1. 開啟 `chrome://extensions/`
 2. 啟用「開發人員模式」
 3. 點「載入未封裝項目」→ 選擇 `02-web/` 資料夾
+
+---
+
+## English
+
+A Chrome focus-mask extension. One click drops a black overlay over distracting sites — useful for deep work, or for breaking the phone-before-bed habit.
+
+### Modes
+| Mode | Trigger | Notes |
+|------|---------|-------|
+| Focus | Manual | Optional timer, auto-stops when time's up |
+| Sleep | Scheduled, auto-starts | Requires a confirmation password to disable (anti-cheat) |
+| Deep work | Manual | Strictest; separate whitelist |
+| Pomodoro | Manual | Pairs with the Pomodoro technique |
+
+Each mode has its own independent whitelist.
+
+### Tech stack
+- Chrome Extension (Manifest V3)
+- Vanilla JavaScript
+- Background service worker + content script
+
+### Install
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select the `02-web/` folder
